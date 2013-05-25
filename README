@@ -1,0 +1,14 @@
+
+Quick start instructions
+========================
+
+Install required software (Ubuntu):
+    sudo apt-get install python-dev python-pip virtualenvwrapper
+
+Clone the repository:
+    git clone ...
+
+Create a virtual environment:
+    mkvirtualenv -r requirements.txt env1
+
+
