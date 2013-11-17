@@ -1,4 +1,6 @@
 *.py[cod]
+output
+redfred
 
 # C extensions
 *.so
@@ -10,6 +12,7 @@ dist
 build
 eggs
 parts
+Bin
 bin
 var
 sdist
