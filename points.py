@@ -4,6 +4,7 @@ from os.path import isfile, join
 from subprocess import call
 import dicom
 import numpy
+from octrees.octrees import Octree
 
 sampling = 2
 
@@ -12,7 +13,7 @@ myseries = "1.2.840.113704.1.111.3736.1370522307.4"
 out = r"output/redfredc"
 poissionrec = "PoissonRecon/Bin/Linux/PoissonRecon"
 
-def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend):
+def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend = 0):
     t = t.astype(numpy.int16)
     mean = (t[1:, 1:, 1:]  + t[1:, 1:, :-1]  + t[1:, :-1, 1:]  + t[1:,:-1,:-1] 
           + t[:-1, 1:, 1:] + t[:-1, 1:, :-1] + t[:-1, :-1, 1:] + t[:-1,:-1,:-1]) / 8
@@ -29,8 +30,9 @@ def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend):
     #print "gx", gx[:1, :1, :1]
     #print "gy", gy[:1, :1, :1]
     #print "gz", gz.dtype
-
-    del t
+    #print ((posX, posX + (t.shape[0] + 1) * spacingX),(posY, posY + (t.shape[1] + 1) * spacingY),(min(zpositions),max(zpositions)))
+    results = Octree(((posX, posX + (t.shape[2] + 1) * spacingX),(posY, posY + (t.shape[1] + 1) * spacingY),(min(zpositions),max(zpositions))))
+    #del t
     gn = (gx ** 2 + gy ** 2 + gz ** 2) ** 0.5
     nx = gx / gn
     #print nx.dtype
@@ -48,7 +50,6 @@ def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend):
     print dz.dtype
     del dist
     hit = numpy.logical_and(numpy.logical_and(abs(dx) < 0.5, abs(dy) < 0.5), abs(dz) < 0.5)
-    results = []
     for i, j, k in zip(*hit.nonzero()):
         rx = nx[i, j, k] * spacingX
         ry = ny[i, j, k] * spacingY
@@ -57,12 +58,14 @@ def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend):
         rx = -rx / rn
         ry = -ry / rn
         rz = -rz / rn
-        results.append((posX + (k + 0.5 - dx[i, j, k]) * spacingX + rx * extend,
-                                     posY + (j + 0.5 - dy[i, j, k]) * spacingY + ry * extend,
-                                     zpositions[i] * (0.5 + dz[i, j, k]) + zpositions[i+1] * (0.5 - dz[i, j, k]) + rz * extend,
-                                     rx,
-                                     ry,
-                                     rz))
+        #print k, dx[i, j, k], posX, spacingX, t.shape
+        #print posX, posX + (k + 0.5 - dx[i, j, k] / 2) * spacingX, posX + (t.shape[0] + 1) * spacingX
+        results.insert((posX + (k + 0.5 - dx[i, j, k] / 2) * spacingX,
+                        posY + (j + 0.5 - dy[i, j, k] / 2) * spacingY,
+                        zpositions[i] * (0.5 + dz[i, j, k]) + zpositions[i+1] * (0.5 - dz[i, j, k])),
+                        (rx,
+                        ry,
+                        rz))
     del dx
     del dy
     del dz
@@ -73,8 +76,8 @@ def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend):
 
 def points_to_string(points):
     r = ""
-    for point in points:
-        r = r + "%f %f %f %f %f %f\n" % point
+    for ignore, point, normal in points.near_point((0,0,0), 1000):
+        r = r + "%f %f %f %f %f %f\n" % (point[0], point[1], point[2], normal[0], normal[1], normal[2])
     return r
 
 def load(mypath, myseries, level, extend):
@@ -90,16 +93,25 @@ def load(mypath, myseries, level, extend):
     def cmpZ(x, y):
         return cmp(x.ImagePositionPatient[2], y.ImagePositionPatient[2])
     mySlices.sort(cmpZ)
-    mySlices = mySlices[::sampling]
     d=[]
     for s in mySlices:
         a = numpy.fromstring(s.PixelData, dtype=numpy.uint16)
         a.resize(s.Rows, s.Columns)
-        d.append(a[::sampling, ::sampling])
-    zpositions = [s.ImagePositionPatient[2] for s in mySlices]
+        r = 0
+        for i in range(sampling):
+            for j in range(sampling):
+                r = r + a[i::sampling, j::sampling]
+        d.append(r / sampling ** 2)
+    del r
     exampleSlice = mySlices[0]
+    zpositions = [s.ImagePositionPatient[2] for s in mySlices[::sampling]]
     del mySlices
-    t = numpy.array(d)
+    ts = numpy.array(d)
+    t = 0
+    for k in range(sampling):
+        t = t + ts[k:k - sampling - ts.shape[0] % sampling:sampling]
+    del ts
+    t = t / sampling
     del d
     return makepoints(t, 
                       zpositions, 
