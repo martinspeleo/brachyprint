@@ -1,13 +1,16 @@
 from __future__ import division
 from os import listdir
 from os.path import isfile, join
+from subprocess import call
 import dicom
 import numpy
+
 sampling = 2
 
-mypath = "../redfred"
+mypath = "redfred"
 myseries = "1.2.840.113704.1.111.3736.1370522307.4"
-out = "redfredi"
+out = r"output/redfredc"
+poissionrec = "PoissonRecon/Bin/Linux/PoissonRecon"
 
 def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend):
     t = t.astype(numpy.int16)
@@ -45,7 +48,7 @@ def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend):
     print dz.dtype
     del dist
     hit = numpy.logical_and(numpy.logical_and(abs(dx) < 0.5, abs(dy) < 0.5), abs(dz) < 0.5)
-    r = ""
+    results = []
     for i, j, k in zip(*hit.nonzero()):
         rx = nx[i, j, k] * spacingX
         ry = ny[i, j, k] * spacingY
@@ -54,30 +57,27 @@ def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend):
         rx = -rx / rn
         ry = -ry / rn
         rz = -rz / rn
-        n = "%f %f %f %f %f %f\n" % (posX + (k + 0.5 - dx[i, j, k]) * spacingX + rx * extend,
+        results.append((posX + (k + 0.5 - dx[i, j, k]) * spacingX + rx * extend,
                                      posY + (j + 0.5 - dy[i, j, k]) * spacingY + ry * extend,
                                      zpositions[i] * (0.5 + dz[i, j, k]) + zpositions[i+1] * (0.5 - dz[i, j, k]) + rz * extend,
                                      rx,
                                      ry,
-                                     rz)
-        r = r + n
-        #print "data", t[i, j, k], t[i + 1, j, k], t[i, j + 1, k], t[i + 1, j + 1, k], t[i, j, k + 1], t[i + 1, j, k + 1], t[i, j + 1, k + 1], t[i + 1, j + 1, k + 1]
-        #print "mean", mean[i, j, k]
-        #print "gradient", gn[i, j, k], gx[i, j, k], gy[i, j, k], gz[i, j, k]
-        #print "norm", nx[i, j, k], ny[i, j, k], nz[i, j, k]
-        #print "dist", dist[i, j, k], dx[i, j, k], dy[i, j, k], dz[i, j, k]
-        #print (k + 0.5 + dx[i, j, k])
-        #print "results", n
-        #print
+                                     rz))
     del dx
     del dy
     del dz
     del nx
     del ny
     del nz
+    return results
+
+def points_to_string(points):
+    r = ""
+    for point in points:
+        r = r + "%f %f %f %f %f %f\n" % point
     return r
 
-def load(mypath, myseries, out, level, extend):
+def load(mypath, myseries, level, extend):
     dicomfiles = [ dicom.read_file(join(mypath,f)) for f in listdir(mypath) if isfile(join(mypath,f)) ]
     mySlices = []
     for d in dicomfiles:
@@ -101,19 +101,31 @@ def load(mypath, myseries, out, level, extend):
     del mySlices
     t = numpy.array(d)
     del d
-    r = makepoints(t, 
-                   zpositions, 
-                   exampleSlice.ImagePositionPatient[0], 
-                   exampleSlice.ImagePositionPatient[1],
-                   exampleSlice.PixelSpacing[0] * sampling,
-                   exampleSlice.PixelSpacing[1] * sampling,
-                   level, extend)
-    f = open(out + str(level) + ".plt", "w")
-    f.write(r)
+    return makepoints(t, 
+                      zpositions, 
+                      exampleSlice.ImagePositionPatient[0], 
+                      exampleSlice.ImagePositionPatient[1],
+                      exampleSlice.PixelSpacing[0] * sampling,
+                      exampleSlice.PixelSpacing[1] * sampling,
+                      level, extend)
+
+def save(points, outfile):
+    f = open(outfile, "w")
+    f.write(points_to_string(points))
     f.close()
+
+def poission(infile, outfile):
+    call([poissionrec, "--in", infile, "--out", outfile])
+
+def load_save_poission(mypath, myseries, out, level, extend):
+    points = load(mypath, myseries, level, extend)
+    pointsfile = out + str(level) + ".plt"
+    save(points, pointsfile)
+    meshfile = out + str(level) + ".ply"
+    poission(pointsfile, meshfile)
 
 if __name__ == '__main__':
     #load(mypath, myseries, out, 500, 0)
-    load(mypath, myseries, out, 501, 5)
+    load_save_poission(mypath, myseries, out, 500, 0)
     #load(mypath, myseries, out, 1200, 0)
 
