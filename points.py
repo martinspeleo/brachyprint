@@ -10,7 +10,7 @@ sampling = 2
 
 mypath = "redfred"
 myseries = "1.2.840.113704.1.111.3736.1370522307.4"
-out = r"output/redfredc"
+out = r"output/redfredm"
 poissionrec = "PoissonRecon/Bin/Linux/PoissonRecon"
 
 def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend = 0):
@@ -60,8 +60,8 @@ def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend = 0)
         rz = -rz / rn
         #print k, dx[i, j, k], posX, spacingX, t.shape
         #print posX, posX + (k + 0.5 - dx[i, j, k] / 2) * spacingX, posX + (t.shape[0] + 1) * spacingX
-        results.insert((posX + (k + 0.5 - dx[i, j, k] / 2) * spacingX,
-                        posY + (j + 0.5 - dy[i, j, k] / 2) * spacingY,
+        results.insert((posX + (k + 0.5 - dx[i, j, k]) * spacingX,
+                        posY + (j + 0.5 - dy[i, j, k]) * spacingY,
                         zpositions[i] * (0.5 + dz[i, j, k]) + zpositions[i+1] * (0.5 - dz[i, j, k])),
                         (rx,
                         ry,
@@ -80,7 +80,7 @@ def points_to_string(points):
         r = r + "%f %f %f %f %f %f\n" % (point[0], point[1], point[2], normal[0], normal[1], normal[2])
     return r
 
-def load(mypath, myseries, level, extend):
+def load(mypath, myseries, levels, extend):
     dicomfiles = [ dicom.read_file(join(mypath,f)) for f in listdir(mypath) if isfile(join(mypath,f)) ]
     mySlices = []
     for d in dicomfiles:
@@ -113,13 +113,14 @@ def load(mypath, myseries, level, extend):
     del ts
     t = t / sampling
     del d
-    return makepoints(t, 
+    return dict([(level, 
+                 makepoints(t, 
                       zpositions, 
                       exampleSlice.ImagePositionPatient[0], 
                       exampleSlice.ImagePositionPatient[1],
                       exampleSlice.PixelSpacing[0] * sampling,
                       exampleSlice.PixelSpacing[1] * sampling,
-                      level, extend)
+                      level, extend)) for level in levels])
 
 def save(points, outfile):
     f = open(outfile, "w")
@@ -129,15 +130,21 @@ def save(points, outfile):
 def poission(infile, outfile):
     call([poissionrec, "--in", infile, "--out", outfile])
 
-def load_save_poission(mypath, myseries, out, level, extend):
-    points = load(mypath, myseries, level, extend)
-    pointsfile = out + str(level) + ".plt"
-    save(points, pointsfile)
-    meshfile = out + str(level) + ".ply"
-    poission(pointsfile, meshfile)
-
 if __name__ == '__main__':
-    #load(mypath, myseries, out, 500, 0)
-    load_save_poission(mypath, myseries, out, 500, 0)
-    #load(mypath, myseries, out, 1200, 0)
+    points = load(mypath, myseries, [500, 1200], 0)
+    clean_skin = Octree(points[500].bounds)
+    for ignore, point, normal in points[500].near_point((0,0,0), 1000):
+        try:
+            points[1200].near_point(point, 2).next()
+        except StopIteration:
+            clean_skin.insert(point, normal)
+    skinpointsfile = out + "500.plt"
+    bonepointsfile = out + "1200.plt"
+    cleanskinpointsfile = out + "clean.plt"
+    save(points[500], skinpointsfile)
+    poission(skinpointsfile, out + "skin.ply")
+    save(clean_skin, cleanskinpointsfile)
+    poission(cleanskinpointsfile, out + "clean.ply")
+    save(points[1200], bonepointsfile)
+    poission(bonepointsfile, out + "bone.ply")
 
