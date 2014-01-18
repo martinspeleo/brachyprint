@@ -104,6 +104,9 @@ class Vertex:
         n = sum([f.normal for f in self.faces], nullVector)
         return n.normalise()
 
+    def adjacent_verticies(self):
+        return [e.v1 for e in self.edges if e.v2 is self] + [e.v2 for e in self.edges if e.v1 is self]
+
 class Vector:
     def __init__(self, x, y, z):
         self.x, self.y, self.z = x, y, z

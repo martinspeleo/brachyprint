@@ -8,6 +8,9 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import *
 import parseply, model
+from math import pi, acos
+from heapq import heappush, heappop
+from itertools import chain
 
 BLOCKSIZE = 100
 
@@ -119,18 +122,32 @@ class MeshCanvas(glcanvas.GLCanvas):
                 glPushName(i)
                 glTranslatef(sphere[0], sphere[1], sphere[2])
                 glColor3f(0.2,1,0.2)
-                glutSolidSphere(3, 10, 10)
-                glutSolidCylinder(1.5, ((sphere[0] -nextsphere[0]) ** 2 + 
-                                        (sphere[1] -nextsphere[1]) ** 2 + 
-                                        (sphere[2] -nextsphere[2]) ** 2) ** 0.5, 10 ,1)
+                glutSolidSphere(7, 10, 10)
                 glPopName()
                 glPopMatrix()
+                path = self.get_path(sphere, nextsphere)
+                for (start, end) in zip(path[:-1], path[1:]):
+                    dx = start[0] - end[0]
+                    dy = start[1] - end[1]
+                    dz = start[2] - end[2]
+                    length_d = (dx ** 2 + dy ** 2 + dz ** 2) ** 0.5
+                    if length_d > 0:
+                        #axis of rotation = (0, 0, 1) cross (dx, dy, dz) = (-dy, dx, 0)
+                        #angle to rotate = 180.0 / pi * acos((0,0,1).(dx, dy, dz) / (dx, dy, dz).(dx, dy, dz))
+                        glPushMatrix()
+                        glTranslatef(start[0], start[1], start[2])
+                        glRotatef(180.0 / pi * acos(dz / length_d), -dy, dx, 0)
+                        glutSolidSphere(3, 10, 10)
+                        glutSolidCylinder(3, -length_d, 20 ,20)
+                        glPopMatrix()
         glEndList()
             
     def placeSphere(self, i = None):
+        #Find block
         hits = self.hit(self.x, self.y, opengl_list(self.mainList), self.mainNumNames)
         if hits:
             x, y, z = gluUnProject(self.x, self.GetClientSize().height - self.y, hits[0][0])
+            #Find triangle
             hits = self.hit(self.x, self.y, renderOneBlock(hits[0][2][0], self.vol), BLOCKSIZE)
             if i is None:
                 self.spheres.append((x, y, z, hits[0][2][0]))
@@ -244,6 +261,84 @@ class MeshCanvas(glcanvas.GLCanvas):
         glRotatef(self.phi, 0.0, 1.0, 0.0)
         glTranslatef(-self.mean_x, -self.mean_y, -self.mean_z)
 
+    def get_path(self, s1, s2):
+        s2Postion = s2[0], s2[1], s2[2]
+        s2Face = self.mesh.faces[s2[3]]
+        priority_queue = []
+        visited = {}
+        if s1[3] == s2[3]:
+            return [(s1[0], s1[1], s1[2]), (s2[0], s2[1], s2[2])]
+        for v in self.mesh.faces[s1[3]].vertices:
+            pv = point_to_vertex(s1[0], s1[1], s1[2], v, s2Postion, s2Face)
+            heappush(priority_queue, (pv.dist() + pv.crowdist(), pv.dist(), [pv]))	
+        while (len(priority_queue) > 0):
+            dist_plus_crow, dist, paths = heappop(priority_queue)
+            lastPath = paths[-1]
+            end = lastPath.end()
+            if end not in visited:
+                if lastPath.finished():
+                    #Finished!
+                    return [(s1[0], s1[1], s1[2])] + sum([p.points() for p in paths], [])
+                else:
+                    visited[end] = True
+                    for newPath in lastPath.new_Paths():
+                        new_dist = newPath.dist()
+                        heappush(priority_queue, (dist + new_dist + pv.crowdist(), dist + new_dist, paths + [newPath]))
+
+class point_to_vertex:
+    def __init__(self, sx, sy, sz, e, endPoint = None, endFace = None):
+        self.sx, self.sy, self.sz, self.e = sx, sy, sz, e
+        self.endPoint, self.endFace = endPoint, endFace
+    def dist(self):
+        return ((self.sx - self.e.x) ** 2 + (self.sy - self.e.y) ** 2 + (self.sz - self.e.z) ** 2) ** 0.5
+    def crowdist(self):
+        return ((self.e.x - self.endPoint[0]) ** 2 + (self.e.y - self.endPoint[1]) ** 2 + (self.e.z - self.endPoint[2]) ** 2) ** 0.5
+    def end(self):
+        return self.e
+    def points(self):
+        return [(self.e.x, self.e.y, self.e.z)]
+    def new_Paths(self):
+        results = [follow_edge(self.e, v, self.endPoint, self.endFace) for v in self.e.adjacent_verticies()] 
+        if self.endPoint is not None and self.endFace in self.e.faces:
+            results += [vertex_to_point(self.e, self.endPoint)]
+        return results
+    def finished(self):
+        return False
+    #def __str__(self):
+     
+
+class follow_edge:
+    def __init__(self, s, e, endPoint = None, endFace = None):
+        self.s, self.e = s, e
+        self.endPoint, self.endFace = endPoint, endFace
+    def dist(self):
+        return ((self.s.x - self.e.x) ** 2 + (self.s.y - self.e.y) ** 2 + (self.s.z - self.e.z) ** 2) ** 0.5
+    def end(self):
+        return self.e
+    def points(self):
+        return [(self.e.x, self.e.y, self.e.z)]
+    def new_Paths(self):
+        results =  [follow_edge(self.e, v, self.endPoint, self.endFace) for v in self.e.adjacent_verticies()] 
+        if self.endPoint is not None and self.endFace in self.e.faces:
+            results += [vertex_to_point(self.e, self.endPoint)]
+        return results
+    def finished(self):
+        return False
+    def crowdist(self):
+        return ((self.e.x - self.endPoint[0]) ** 2 + (self.e.y - self.endPoint[1]) ** 2 + (self.e.z - self.endPoint[2]) ** 2) ** 0.5
+
+class vertex_to_point:
+    def __init__(self, s, (ex, ey, ez)):
+        self.s, self.ex, self.ey, self.ez = s, ex, ey, ez
+    def dist(self):
+        return ((self.s.x - self.ex) ** 2 + (self.s.y - self.ey) ** 2 + (self.s.z - self.ez) ** 2) ** 0.5
+    def finished(self):
+        return True
+    def points(self):
+        return [(self.ex, self.ey, self.ez)]
+    def end(self):
+        return "Finished!!!"
+
 class opengl_lists:
     def __init__(self, lists):
         self.lists = lists
@@ -258,6 +353,7 @@ class opengl_list:
         glCallList(self.list)
 
 class renderOneBlock:
+    """A volume is split into multiple blocks, each containing BLOCKSIZE triangles"""
     def __init__(self, block_name, vol):
         self.block_name = block_name
         self.vol = vol
@@ -321,7 +417,8 @@ class MainWindow(wx.Frame):
         box = wx.BoxSizer(wx.HORIZONTAL)
         box.Add(self.modePanel, 0.5, wx.EXPAND)
         #box.Add(CubeCanvas(self), 1, wx.EXPAND)
-        f = open("output/redfredc501.ply")
+        f = open("output/redfredcclean.ply")
+        #f = open("output/redfredc501.ply")
         d = parseply.parseply(f)
         f.close()
         tc = MeshCanvas(self, model.makeMesh(d), self.modePanel)
