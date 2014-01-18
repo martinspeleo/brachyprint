@@ -51,9 +51,9 @@ def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend = 0)
     del dist
     hit = numpy.logical_and(numpy.logical_and(abs(dx) < 0.5, abs(dy) < 0.5), abs(dz) < 0.5)
     for i, j, k in zip(*hit.nonzero()):
-        rx = nx[i, j, k] * spacingX
-        ry = ny[i, j, k] * spacingY
-        rz = nz[i, j, k] * (zpositions[i+1] - zpositions[i])
+        rx = nx[i, j, k] / spacingX
+        ry = ny[i, j, k] / spacingY
+        rz = nz[i, j, k] / (zpositions[i+1] - zpositions[i])
         rn = (rx ** 2 + ry ** 2 + rz ** 2) ** 0.5
         rx = -rx / rn
         ry = -ry / rn
