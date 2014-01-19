@@ -6,14 +6,15 @@ import dicom
 import numpy
 from octrees.octrees import Octree
 
-sampling = 2
+sampling = 4
+POISSON_DEPTH = 4
 
 mypath = "redfred"
 myseries = "1.2.840.113704.1.111.3736.1370522307.4"
-out = r"output/redfredm"
+out = r"output/redfredc"
 poissionrec = "PoissonRecon/Bin/Linux/PoissonRecon"
 
-def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level, extend = 0):
+def makepoints(t, zpositions, posX, posY, spacingX, spacingY, level):
     t = t.astype(numpy.int16)
     mean = (t[1:, 1:, 1:]  + t[1:, 1:, :-1]  + t[1:, :-1, 1:]  + t[1:,:-1,:-1] 
           + t[:-1, 1:, 1:] + t[:-1, 1:, :-1] + t[:-1, :-1, 1:] + t[:-1,:-1,:-1]) / 8
@@ -80,7 +81,7 @@ def points_to_string(points):
         r = r + "%f %f %f %f %f %f\n" % (point[0], point[1], point[2], normal[0], normal[1], normal[2])
     return r
 
-def load(mypath, myseries, levels, extend):
+def load(mypath, myseries, levels):
     dicomfiles = [ dicom.read_file(join(mypath,f)) for f in listdir(mypath) if isfile(join(mypath,f)) ]
     mySlices = []
     for d in dicomfiles:
@@ -120,31 +121,33 @@ def load(mypath, myseries, levels, extend):
                       exampleSlice.ImagePositionPatient[1],
                       exampleSlice.PixelSpacing[0] * sampling,
                       exampleSlice.PixelSpacing[1] * sampling,
-                      level, extend)) for level in levels])
+                      level)) for level in levels])
 
 def save(points, outfile):
     f = open(outfile, "w")
     f.write(points_to_string(points))
     f.close()
 
-def poission(infile, outfile):
-    call([poissionrec, "--in", infile, "--out", outfile])
+def poission(infile, outfile, poisson_depth = 8):
+    call([poissionrec, "--in", infile, "--out", outfile, "--depth", str(poisson_depth)])
 
 if __name__ == '__main__':
-    points = load(mypath, myseries, [500, 1200], 0)
+    points = load(mypath, myseries, [500, 1200])
+    #Make clean skin point cloud by removing any skin points (density 500) that are near bone/metal points (density 12000)
     clean_skin = Octree(points[500].bounds)
     for ignore, point, normal in points[500].near_point((0,0,0), 1000):
         try:
             points[1200].near_point(point, 2).next()
         except StopIteration:
             clean_skin.insert(point, normal)
+    
     skinpointsfile = out + "500.plt"
     bonepointsfile = out + "1200.plt"
     cleanskinpointsfile = out + "clean.plt"
     save(points[500], skinpointsfile)
-    poission(skinpointsfile, out + "skin.ply")
+    poission(skinpointsfile, out + "skin.ply", POISSON_DEPTH)
     save(clean_skin, cleanskinpointsfile)
-    poission(cleanskinpointsfile, out + "clean.ply")
+    poission(cleanskinpointsfile, out + "clean.ply", POISSON_DEPTH)
     save(points[1200], bonepointsfile)
-    poission(bonepointsfile, out + "bone.ply")
+    poission(bonepointsfile, out + "bone.ply", POISSON_DEPTH)
 
